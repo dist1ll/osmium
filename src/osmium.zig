@@ -45,7 +45,7 @@ pub fn StackVec(comptime T: type, comptime max: usize) type {
 const ERR_01 = "Only enums with less than 256 variants are permitted";
 
 /// A container that stores tagged unions. Does not support iteration. Only allows
-/// appending elements, and retrieving/deleting elements via a tagged index.
+/// single-insertion, and retrieving/deleting elements via a tagged index.
 pub fn DenseUnionArray(comptime inner: type) type {
     var svec = StackVec(usize, 256).init();
     const cfg = cfg: {
@@ -68,12 +68,16 @@ pub fn DenseUnionArray(comptime inner: type) type {
         }
     };
     return struct {
+        const Self = @This();
+        const Error = error{
+            /// Too many elements to index, leaving no room for tag bits.
+            ExhaustedIndexSpace,
+        };
         /// The union type stored in this collection
         const T = inner;
         const SelfTag = std.meta.Tag(T);
         const tag_values = std.enums.values(SelfTag);
         const tag_names = std.meta.fieldNames(SelfTag);
-        const Self = @This();
         /// The Array-of-Variant-Arrays
         const AoVA = [cfg.sizes.len]std.ArrayList(u8);
 
@@ -90,7 +94,7 @@ pub fn DenseUnionArray(comptime inner: type) type {
         /// Inserts the element into the container, and returns a tagged index.
         /// The index can be used to retrieve the element or delete it.
         /// Tagged indices are not contiguous and highly implementation-specific.
-        pub fn append(self: *Self, item: T) std.mem.Allocator.Error!usize {
+        pub fn append(self: *Self, item: T) !usize {
             var tag = std.meta.activeTag(item);
             // TODO: use comptime LUT instead of inline for
             inline for (tag_values, tag_names) |v, n| {
@@ -104,9 +108,18 @@ pub fn DenseUnionArray(comptime inner: type) type {
                     // compute tagged index
                     var return_idx =
                         self.vecs[aova_idx].items.len / @sizeOf(VariantType);
-                    // use low bits for tag
+
+                    // SAFETY: index needs to leave enough room for tag bits
+                    if (return_idx >=
+                        (1 << (@bitSizeOf(usize) - @bitSizeOf(SelfTag))))
+                    {
+                        return Error.ExhaustedIndexSpace;
+                    }
+
+                    // Insert tag into low bits
                     return_idx = return_idx << @bitSizeOf(SelfTag);
                     return_idx = return_idx | tag_idx;
+
                     // insert the data
                     try self.vecs[aova_idx].appendSlice(&data);
                     return return_idx; // make no-fall-through explicit
