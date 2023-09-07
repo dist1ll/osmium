@@ -18,7 +18,6 @@ const Enum = union(Tag) {
     g: u64,
 };
 
-
 pub fn main() !void {
     std.debug.print("\ninfo: Testing osmium\n", .{});
 
@@ -26,5 +25,6 @@ pub fn main() !void {
     var alloc = gpa.allocator();
 
     var abc = osmium.DenseUnionArray(Enum).init(alloc);
-    try abc.append(Enum{ .g = 0xfffffffff });
+    const idx = try abc.append(Enum{ .a = 0xff });
+    std.debug.print("idx: {}", .{idx});
 }

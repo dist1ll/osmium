@@ -90,9 +90,9 @@ pub fn DenseUnionArray(comptime inner: type) type {
         /// Inserts the element into the container, and returns a tagged index.
         /// The index can be used to retrieve the element or delete it.
         /// Tagged indices are not contiguous and highly implementation-specific.
-        pub fn append(self: *Self, item: T) std.mem.Allocator.Error!void {
+        pub fn append(self: *Self, item: T) std.mem.Allocator.Error!usize {
             var tag = std.meta.activeTag(item);
-            // use comptime LUT instead of inline for
+            // TODO: use comptime LUT instead of inline for
             inline for (tag_values, tag_names) |v, n| {
                 if (tag == v) {
                     // cast the data typesafe to a byte array
@@ -100,11 +100,19 @@ pub fn DenseUnionArray(comptime inner: type) type {
                     const data: [@sizeOf(VariantType)]u8 = @bitCast(@field(item, n));
                     const tag_idx = @intFromEnum(v);
                     const aova_idx = comptime cfg.field_map[tag_idx];
+
+                    // compute tagged index
+                    var return_idx =
+                        self.vecs[aova_idx].items.len / @sizeOf(VariantType);
+                    // use low bits for tag
+                    return_idx = return_idx << @bitSizeOf(SelfTag);
+                    return_idx = return_idx | tag_idx;
+                    // insert the data
                     try self.vecs[aova_idx].appendSlice(&data);
-                    return; // make no-fall-through explicit
+                    return return_idx; // make no-fall-through explicit
                 }
-                @compileLog(v);
             }
+            return 0;
         }
     };
 }
