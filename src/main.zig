@@ -25,7 +25,8 @@ pub fn main() !void {
     var alloc = gpa.allocator();
 
     var abc = osmium.DenseUnionArray(Enum).init(alloc);
-    _ = try abc.append(Enum{ .c = 0xff });
-    const idx = try abc.append(Enum{ .d = 0xff });
-    std.debug.print("idx: {b}", .{idx});
+    _ = try abc.append(Enum{ .b = 0xfa });
+    const idx = try abc.append(Enum{ .d = 0xfb });
+    _ = try abc.append(Enum{ .c = 0xfc });
+    try abc.swapRemove(idx);
 }

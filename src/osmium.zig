@@ -56,11 +56,11 @@ pub fn DenseUnionArray(comptime inner: type) type {
                 var field_map = [_]u8{0} ** u.fields.len;
                 const x = u.fields;
                 for (x, 0..) |field, idx| {
-                    field_map[idx] = svec.len;
                     const space = @max(field.alignment, @sizeOf(field.type));
                     if (!svec.contains_slow(space)) {
                         svec.push(space) catch @compileError(ERR_01);
                     }
+                    field_map[idx] = svec.len - 1;
                 }
                 break :cfg .{ .field_map = field_map, .sizes = svec };
             },
@@ -70,7 +70,12 @@ pub fn DenseUnionArray(comptime inner: type) type {
     return struct {
         const Self = @This();
         const Error = error{
+            IndexOutOfBounds,
             /// Too many elements to index, leaving no room for tag bits.
+            /// Example: You have a tagged union with 30 variants. The
+            /// enum tag occupies at least 5 bits, leaving 64-5 = 61 bits
+            /// for the index. Thus, if you attempt to append the 2^61-th item,
+            /// this error will be returned.
             ExhaustedIndexSpace,
         };
         /// The union type stored in this collection
@@ -80,7 +85,7 @@ pub fn DenseUnionArray(comptime inner: type) type {
         const tag_names = std.meta.fieldNames(SelfTag);
         /// The Array-of-Variant-Arrays
         const AoVA = [cfg.sizes.len]std.ArrayList(u8);
-
+        const TaggedIndex = struct { inner: usize };
         allocator: std.mem.Allocator,
         vecs: AoVA,
 
@@ -94,16 +99,19 @@ pub fn DenseUnionArray(comptime inner: type) type {
         /// Inserts the element into the container, and returns a tagged index.
         /// The index can be used to retrieve the element or delete it.
         /// Tagged indices are not contiguous and highly implementation-specific.
-        pub fn append(self: *Self, item: T) !usize {
+        pub fn append(self: *Self, item: T) !TaggedIndex {
             var tag = std.meta.activeTag(item);
             // TODO: use comptime LUT instead of inline for
             inline for (tag_values, tag_names) |v, n| {
                 if (tag == v) {
-                    // cast the data typesafe to a byte array
-                    const VariantType = std.meta.TagPayload(T, v);
-                    const data: [@sizeOf(VariantType)]u8 = @bitCast(@field(item, n));
+                    // calculate size of this tag class
                     const tag_idx = @intFromEnum(v);
                     const aova_idx = comptime cfg.field_map[tag_idx];
+                    const data_len = cfg.sizes.buffer[aova_idx];
+
+                    // cast the data typesafe to a byte array
+                    const VariantType = std.meta.TagPayload(T, v);
+                    const data: [data_len]u8 = @bitCast(@field(item, n));
 
                     // compute tagged index
                     var return_idx =
@@ -122,10 +130,35 @@ pub fn DenseUnionArray(comptime inner: type) type {
 
                     // insert the data
                     try self.vecs[aova_idx].appendSlice(&data);
-                    return return_idx; // make no-fall-through explicit
+                    return .{ .inner = return_idx }; // make no-fall-through explicit
                 }
             }
-            return 0;
+            unreachable;
+        }
+        /// Removes the element given by the tagged index, by swapping in the
+        /// last element.
+        pub fn swapRemove(self: *Self, tagged_idx: TaggedIndex) !void {
+            const mask: usize = comptime (1 << @bitSizeOf(SelfTag)) - 1;
+            const tag = tagged_idx.inner & mask;
+            const idx = tagged_idx.inner >> @bitSizeOf(SelfTag);
+            const aova_idx = cfg.field_map[tag];
+            const data_len = cfg.sizes.buffer[aova_idx];
+            const byte_idx = idx * data_len;
+            const last_byte_idx = self.vecs[aova_idx].items.len - data_len;
+
+            // if target isn't last element, swap with last element
+            if (byte_idx < last_byte_idx) {
+                const dst =
+                    self.vecs[aova_idx].items[byte_idx..(byte_idx + data_len)];
+                const src = self.vecs[aova_idx]
+                    .items[last_byte_idx..(last_byte_idx + data_len)];
+                @memcpy(dst, src);
+            } else if (byte_idx > last_byte_idx) {
+                return Error.IndexOutOfBounds;
+            }
+
+            // truncate vec
+            try self.vecs[aova_idx].resize(last_byte_idx);
         }
     };
 }
