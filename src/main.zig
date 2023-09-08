@@ -24,7 +24,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var alloc = gpa.allocator();
 
-    var abc = osmium.DenseUnionArray(Enum).init(alloc);
+    var abc = osmium.AovaDense(Enum).init(alloc);
+    defer abc.deinit();
+
     _ = try abc.append(Enum{ .b = 0xfa });
     const idx = try abc.append(Enum{ .d = 0xfb });
     _ = try abc.append(Enum{ .c = 0xfc });

@@ -44,18 +44,20 @@ pub fn StackVec(comptime T: type, comptime max: usize) type {
 
 const ERR_01 = "Only enums with less than 256 variants are permitted";
 
-/// A container that stores tagged unions. Does not support iteration. Only allows
-/// single-insertion, and retrieving/deleting elements via a tagged index.
-pub fn DenseUnionArray(comptime inner: type) type {
+/// Aova = Array of Variant Arrays
+///
+/// A maximally dense Aova, clustered by type size (or alignment, if larger).
+/// - Single-insertion. Returns tagged index w/ union tag
+/// - No type-safe iteration (use AovaIterable instead)
+/// - Allows swapRemove
+pub fn AovaDense(comptime inner: type) type {
     var svec = StackVec(usize, 256).init();
     const cfg = cfg: {
         switch (@typeInfo(inner)) {
             .Union => |u| {
                 // every field maps to a corresponding array.
-
                 var field_map = [_]u8{0} ** u.fields.len;
-                const x = u.fields;
-                for (x, 0..) |field, idx| {
+                for (u.fields, 0..) |field, idx| {
                     const space = @max(field.alignment, @sizeOf(field.type));
                     if (!svec.contains_slow(space)) {
                         svec.push(space) catch @compileError(ERR_01);
@@ -86,15 +88,23 @@ pub fn DenseUnionArray(comptime inner: type) type {
         /// The Array-of-Variant-Arrays
         const AoVA = [cfg.sizes.len]std.ArrayList(u8);
         const TaggedIndex = struct { inner: usize };
+
         allocator: std.mem.Allocator,
         vecs: AoVA,
 
+        /// Deinitialize with `deinit`.
         pub fn init(a: std.mem.Allocator) Self {
             var v: AoVA = undefined;
             for (0..cfg.sizes.len) |i| {
                 v[i] = std.ArrayList(u8).init(a);
             }
             return Self{ .allocator = a, .vecs = v };
+        }
+        /// Release all allocated memory.
+        pub fn deinit(self: Self) void {
+            for(self.vecs) |arr| {
+                arr.deinit();
+            }
         }
         /// Inserts the element into the container, and returns a tagged index.
         /// The index can be used to retrieve the element or delete it.
