@@ -75,8 +75,8 @@ pub fn AovaDense(comptime inner: type) type {
             IndexOutOfBounds,
             /// Too many elements to index, leaving no room for tag bits.
             /// Example: You have a tagged union with 30 variants. The
-            /// enum tag occupies at least 5 bits, leaving 64-5 = 61 bits
-            /// for the index. Thus, if you attempt to append the 2^61-th item,
+            /// enum tag occupies at least 5 bits, leaving 64-5 = 59 bits
+            /// for the index. Thus, if you attempt to append the 2^59-th item,
             /// this error will be returned.
             ExhaustedIndexSpace,
         };
