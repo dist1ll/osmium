@@ -28,7 +28,10 @@ pub fn main() !void {
     defer abc.deinit();
 
     _ = try abc.append(Enum{ .b = 0xfa });
-    const idx = try abc.append(Enum{ .d = 0xfb });
+    _ = try abc.append(Enum{ .g = 0x0000 });
+    _ = try abc.append(Enum{ .g = 0x22310 });
+    const idx = try abc.append(Enum{ .g = 0xffffff });
     _ = try abc.append(Enum{ .c = 0xfc });
-    try abc.swapRemove(idx);
+    const val = abc.get(idx);
+    std.debug.print("idx = {b} -> {}\n", .{idx.inner, val});
 }

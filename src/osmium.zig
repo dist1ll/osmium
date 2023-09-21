@@ -85,6 +85,7 @@ pub fn AovaDense(comptime inner: type) type {
         const SelfTag = std.meta.Tag(T);
         const tag_values = std.enums.values(SelfTag);
         const tag_names = std.meta.fieldNames(SelfTag);
+        const tag_mask = ((1 << @bitSizeOf(SelfTag)) - 1);
         /// The Array-of-Variant-Arrays
         const AoVA = [cfg.sizes.len]std.ArrayList(u8);
         const TaggedIndex = struct { inner: usize };
@@ -102,9 +103,35 @@ pub fn AovaDense(comptime inner: type) type {
         }
         /// Release all allocated memory.
         pub fn deinit(self: Self) void {
-            for(self.vecs) |arr| {
+            for (self.vecs) |arr| {
                 arr.deinit();
             }
+        }
+        pub fn get(self: *Self, tidx: TaggedIndex) T {
+            const tag: SelfTag = @enumFromInt(tidx.inner & tag_mask);
+            // TODO: replace with LUT
+            inline for (tag_values, tag_names) |v, n| {
+                if (tag == v) {
+                    // calculate size of tag class
+                    // TODO: Remove this boilerplate
+                    const tag_idx = @intFromEnum(v);
+                    const aova_idx = comptime cfg.field_map[tag_idx];
+                    const data_len = comptime cfg.sizes.buffer[aova_idx];
+
+                    const idx = (tidx.inner >> @bitSizeOf(SelfTag)) * data_len;
+
+                    // memcpy into byte array, typecast, and construct union
+                    const src = self
+                        .vecs[aova_idx]
+                        .items[idx..(idx + data_len)];
+                    var dst: [data_len]u8 = [_]u8{0} ** data_len;
+                    _ = @memcpy(&dst, src);
+
+                    const cast: std.meta.TagPayload(T, v) = @bitCast(dst);
+                    return @unionInit(T, n, cast);
+                }
+            }
+            unreachable;
         }
         /// Inserts the element into the container, and returns a tagged index.
         /// The index can be used to retrieve the element or delete it.
@@ -117,15 +144,13 @@ pub fn AovaDense(comptime inner: type) type {
                     // calculate size of this tag class
                     const tag_idx = @intFromEnum(v);
                     const aova_idx = comptime cfg.field_map[tag_idx];
-                    const data_len = cfg.sizes.buffer[aova_idx];
+                    const data_len = comptime cfg.sizes.buffer[aova_idx];
 
                     // cast the data typesafe to a byte array
-                    const VariantType = std.meta.TagPayload(T, v);
                     const data: [data_len]u8 = @bitCast(@field(item, n));
 
                     // compute tagged index
-                    var return_idx =
-                        self.vecs[aova_idx].items.len / @sizeOf(VariantType);
+                    var return_idx = self.vecs[aova_idx].items.len / data_len;
 
                     // SAFETY: index needs to leave enough room for tag bits
                     if (return_idx >=
@@ -148,8 +173,7 @@ pub fn AovaDense(comptime inner: type) type {
         /// Removes the element given by the tagged index, by swapping in the
         /// last element.
         pub fn swapRemove(self: *Self, tagged_idx: TaggedIndex) !void {
-            const mask: usize = comptime (1 << @bitSizeOf(SelfTag)) - 1;
-            const tag = tagged_idx.inner & mask;
+            const tag = tagged_idx.inner & tag_mask;
             const idx = tagged_idx.inner >> @bitSizeOf(SelfTag);
             const aova_idx = cfg.field_map[tag];
             const data_len = cfg.sizes.buffer[aova_idx];
